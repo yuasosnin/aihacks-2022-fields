@@ -7,7 +7,7 @@ import geopandas as gpd
 def parse_geometry(geom_str):
     try:
         return shapely.geometry.shape(geojson.loads(geom_str))
-    except (TypeError, AttributeError):  # Handle NaN and empty strings
+    except (TypeError, AttributeError):
         return None
 
     
@@ -24,26 +24,26 @@ def handle_bad_geometry(geometry):
     
 def read_data(filename):
     df = pd.read_csv(filename)
-    df['geometry'] = df['.geo'].apply(parse_geometry).apply(handle_bad_geometry)
+    df['geometry'] = df['.geo'].apply(parse_geometry).apply(handle_bad_geometry).copy()
     return gpd.GeoDataFrame(df, crs=4326)
 
 
 def process_data(data):
     try:
-        data_ts = data.drop(['id', 'area', '.geo', 'crop', 'geometry'], axis=1)
+        data_ts = data.drop(['id', 'area', '.geo', 'crop', 'geometry'], axis=1).copy()
     except KeyError:
-        data_ts = data.drop(['id', 'area', '.geo', 'geometry'], axis=1)
+        data_ts = data.drop(['id', 'area', '.geo', 'geometry'], axis=1).copy()
     data_ts.columns = pd.to_datetime(pd.to_datetime([x[8:] for x in data_ts.columns]))
     data_ts = data_ts[sorted(data_ts.columns)]
     try:
-        data_id = data[['id', 'area', 'crop', 'geometry']]
+        data_id = data[['id', 'area', 'crop', 'geometry']].copy()
     except KeyError:
-        data_id = data[['id', 'area', 'geometry']]
+        data_id = data[['id', 'area', 'geometry']].copy()
         
-    data_id['centroid'] = data_id['geometry'].to_crs(4327).centroid
-    data_id['lat'] = data_id['centroid'].apply(lambda x: x.coords[0][0])
-    data_id['lon'] = data_id['centroid'].apply(lambda x: x.coords[0][1])
-    data_id = data_id.drop('centroid', axis=1)
+    data_id['centroid'] = data_id['geometry'].to_crs(4327).centroid.copy()
+    data_id['lat'] = data_id['centroid'].apply(lambda x: x.coords[0][0]).copy()
+    data_id['lon'] = data_id['centroid'].apply(lambda x: x.coords[0][1]).copy()
+    data_id = data_id.drop('centroid', axis=1).copy()
     
     return data_ts, data_id
 
