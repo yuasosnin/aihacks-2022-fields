@@ -18,9 +18,9 @@ class StackDataset(Dataset):
     
     def __getitem__(self, idx):
         if self.y is not None:
-            return [df.iloc[idx,:].values for df in self.dfs], self.y[idx]
+            return [df.iloc[idx,:].values for df in self.dfs], self.y[idx].astype(int)
         else:
-            return [df.iloc[idx,:].values for df in self.dfs]
+            return [df.iloc[idx,:].values for df in self.dfs], np.nan
 
 
 def seed_worker(worker_id):
