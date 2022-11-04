@@ -50,3 +50,9 @@ def process_data(data):
 
 def ndvi(red, nir):
     return (nir-red)/(nir+red)
+
+
+def split_df(df, size=100):
+    """https://stackoverflow.com/questions/54244560/split-pandas-dataframe-into-n-equal-parts-1"""
+    n = int(len(df)/size)
+    return [df.iloc[i*size:(i+1)*size].copy() for i in range(n+1)]
