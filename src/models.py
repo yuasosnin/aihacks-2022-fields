@@ -1,30 +1,23 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
 import pytorch_lightning as pl
 import torchmetrics
 
 from tsai.models.TST import TST as TimeSeriesTransformer
+from tsai.models.InceptionTime import InceptionTime
 from torchvision.ops import MLP
+from .reduce import MaxReduce, AvgReduce, ParamReduce
 
 
 class StackRNN(pl.LightningModule):
-    seq_lens = [70, 139, 18]
+    seq_lens = [70, 139, 18, 55]
     num_classes = 7
 
     def __init__(self, hidden_size, layers=1, bidirectional=True, dropout=0, fc_layers=1, **hparams):
         super().__init__()
         self.save_hyperparameters()
-
-        # self.rnn1 = nn.GRU(
-        #     input_size=1, hidden_size=hidden_size, num_layers=layers, bidirectional=bidirectional,
-        #     batch_first=True, dropout=dropout)
-        # self.rnn2 = nn.GRU(
-        #     input_size=1, hidden_size=hidden_size, num_layers=layers, bidirectional=bidirectional,
-        #     batch_first=True, dropout=dropout)
-        # self.rnn3 = nn.GRU(
-        #     input_size=1, hidden_size=hidden_size, num_layers=layers, bidirectional=bidirectional,
-        #     batch_first=True, dropout=dropout)
         
         self.models = nn.ModuleList([nn.GRU(
             input_size=1, hidden_size=hidden_size, num_layers=layers, 
@@ -39,7 +32,7 @@ class StackRNN(pl.LightningModule):
         self.head = MLP(
             in_channels=rnn_out_size, 
             hidden_channels=[rnn_out_size]*fc_layers + [self.num_classes],
-            activation_layer=act)
+            activation_layer=act, inplace=None)
         
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
@@ -89,7 +82,8 @@ class StackRNN(pl.LightningModule):
 
 
 class StackTransformer(pl.LightningModule):
-    seq_lens = [70, 139, 18]
+    # seq_lens = [70, 139, 18, 55]
+    # seq_lens = [139, 18, 55]
     num_classes = 7
     
     def __init__(
@@ -101,31 +95,27 @@ class StackTransformer(pl.LightningModule):
             num_layers=1, 
             num_head_layers=1,
             dropout=0, 
-            activation='relu', 
+            activation='relu',
+            seq_lens=[70, 139, 18, 55],
             **hparams):
         super().__init__()
         self.save_hyperparameters()
-        
-        # self.model1 = TimeSeriesTransformer(
-        #     c_in=1, c_out=d_head, seq_len=self.seq_lens[0],
-        #     d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, dropout=dropout, act=activation, n_layers=num_layers)
-        # self.model2 = TimeSeriesTransformer(
-        #     c_in=1, c_out=d_head, seq_len=self.seq_lens[1],
-        #     d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, dropout=dropout, act=activation, n_layers=num_layers)
-        # self.model3 = TimeSeriesTransformer(
-        #     c_in=1, c_out=d_head, seq_len=self.seq_lens[2],
-        #     d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, dropout=dropout, act=activation, n_layers=num_layers)
+        self.seq_lens = seq_lens
         
         self.models = nn.ModuleList([TimeSeriesTransformer(
             c_in=1, c_out=d_head, seq_len=seq_len,
             d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
             dropout=dropout, act=activation, n_layers=num_layers
         ) for seq_len in self.seq_lens])
+        # self.coeffs = nn.Parameter(torch.normal(1/len(seq_lens), 0.2, (1, len(self.seq_lens))).squeeze())
+        
+        # self.pool = MaxReduce()
+        self.pool = ParamReduce(in_dim=len(self.seq_lens))
         
         if activation == 'relu':
             act = nn.ReLU
         elif activation == 'gelu':
-            act = nn.GeLU
+            act = nn.GELU
         else:
             raise NotImplemented
         self.act = act()
@@ -133,7 +123,90 @@ class StackTransformer(pl.LightningModule):
         self.head = MLP(
             in_channels=d_head, 
             hidden_channels=[d_head]*num_head_layers + [self.num_classes],
-            activation_layer=act)
+            activation_layer=act, inplace=None)
+        
+        self.criterion = nn.CrossEntropyLoss()
+        self.train_recall = torchmetrics.Recall()
+        self.valid_recall = torchmetrics.Recall()
+
+    def forward(self, xs):
+        hs = [model.forward(x) for model, x in zip(self.models, xs)]
+        h = torch.stack(hs, axis=-1)
+        # h = torch.amax(h, axis=-1)
+        # h = torch.einsum('bhs,s->bh', h, F.softmax(self.coeffs))
+        h = self.pool(h)
+        return self.head(self.act(h))
+        
+    def on_before_batch_transfer(self, batch, dataloader_idx):
+        xs, y = batch
+        xs = [x.unsqueeze(1).float() for x in xs]
+        y = y.long()
+        return xs, y
+    
+    def training_step(self, batch, batch_idx):
+        xs, y = batch
+        output = self.forward(xs)
+        loss = self.criterion(output, y)
+        self.train_recall(torch.tensor(output), y)
+        self.log('train_loss', loss.item(), on_step=True, on_epoch=True)
+        self.log('train_recall', self.train_recall, on_step=True, on_epoch=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        xs, y = batch
+        output = self.forward(xs)
+        loss = self.criterion(output, y)
+        self.valid_recall(torch.tensor(output), y)
+        self.log('valid_loss', loss.item(), on_step=True, on_epoch=True)
+        self.log('valid_recall', self.valid_recall, on_step=True, on_epoch=True)
+        return loss
+
+    def predict_step(self, batch, batch_idx):
+        xs, _ = batch
+        output = self.forward(xs)
+        return torch.tensor(output)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, self.hparams.gamma)
+        return [optimizer], [scheduler]
+    
+    
+class StackInception(pl.LightningModule):
+    seq_lens = [70, 139, 18, 55]
+    num_classes = 7
+    
+    def __init__(
+            self, 
+            d_model=32, 
+            d_head=128, 
+            num_head_layers=1,
+            dropout=0, 
+            activation='relu', 
+            **hparams):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        def decapitate(model, head='fc'):
+            model.__setattr__(head, nn.Identity())
+            return model
+        
+        self.models = nn.ModuleList([decapitate(InceptionTime(
+            c_in=1, c_out=1, seq_len=seq_len, nf=d_model
+        )) for seq_len in self.seq_lens])
+        
+        if activation == 'relu':
+            act = nn.ReLU
+        elif activation == 'gelu':
+            act = nn.GELU
+        else:
+            raise NotImplemented
+        self.act = act()
+        
+        self.head = MLP(
+            in_channels=d_model*4, 
+            hidden_channels=[d_head]*num_head_layers + [self.num_classes],
+            activation_layer=act, inplace=None)
         
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
@@ -144,17 +217,6 @@ class StackTransformer(pl.LightningModule):
         h = torch.stack(hs, axis=-1)
         h = torch.amax(h, axis=-1)
         return self.head(self.act(h))
-    
-    # def _prepare_batch(self, batch, train=True):
-    #     if train:
-    #         xs, y = batch
-    #         xs = [x.unsqueeze(1).float() for x in xs]
-    #         y = y.long()
-    #         return xs, y
-    #     else:
-    #         xs = batch
-    #         xs = [x.unsqueeze(1).float() for x in xs]
-    #         return xs
         
     def on_before_batch_transfer(self, batch, dataloader_idx):
         xs, y = batch

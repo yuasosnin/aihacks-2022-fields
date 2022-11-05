@@ -10,8 +10,8 @@ import pytorch_lightning as pl
 class StackDataset(Dataset):
     def __init__(self, *args, y=None):
         super().__init__()
-        self.dfs = args
-        self.y = y
+        self.dfs = [df.reset_index(drop=True) for df in args]
+        self.y = y.reset_index(drop=True) if y is not None else None
         
     def __len__(self):
         return self.dfs[0].shape[0]
