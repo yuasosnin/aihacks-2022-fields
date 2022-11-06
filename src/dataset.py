@@ -31,7 +31,7 @@ def seed_worker(worker_id):
     
 class StackDataModule(pl.LightningDataModule):
     def __init__(
-        self, train_dataset, val_dataset, test_dataset=None, batch_size=64, num_workers=0):
+        self, train_dataset, val_dataset, test_dataset, pred_dataset, batch_size=64, num_workers=0):
     
         super().__init__()
         self.batch_size = batch_size
@@ -39,6 +39,7 @@ class StackDataModule(pl.LightningDataModule):
         self.train_dataset = train_dataset 
         self.val_dataset = val_dataset
         self.test_dataset = test_dataset
+        self.pred_dataset = pred_dataset
         self.g = torch.Generator()
         self.g.manual_seed(1)
         
@@ -52,7 +53,12 @@ class StackDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size, num_workers=self.num_workers,
                           worker_init_fn=seed_worker, generator=self.g)
     
-    def predict_dataloader(self) -> DataLoader:
+    def test_dataloader(self) -> DataLoader:
         return DataLoader(self.test_dataset, shuffle=False,
+                          batch_size=self.batch_size, num_workers=self.num_workers,
+                          worker_init_fn=seed_worker, generator=self.g)
+    
+    def predict_dataloader(self) -> DataLoader:
+        return DataLoader(self.pred_dataset, shuffle=False,
                           batch_size=self.batch_size, num_workers=self.num_workers,
                           worker_init_fn=seed_worker, generator=self.g)

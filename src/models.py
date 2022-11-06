@@ -88,6 +88,7 @@ class StackTransformer(pl.LightningModule):
     
     def __init__(
             self, 
+            seq_lens=[70, 139, 18, 55],
             d_model=64, 
             nhead=1, 
             dim_feedforward=64, 
@@ -95,8 +96,9 @@ class StackTransformer(pl.LightningModule):
             num_layers=1, 
             num_head_layers=1,
             dropout=0, 
+            fc_dropout=0,
             activation='relu',
-            seq_lens=[70, 139, 18, 55],
+            reduction='avg',
             **hparams):
         super().__init__()
         self.save_hyperparameters()
@@ -105,12 +107,20 @@ class StackTransformer(pl.LightningModule):
         self.models = nn.ModuleList([TimeSeriesTransformer(
             c_in=1, c_out=d_head, seq_len=seq_len,
             d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
-            dropout=dropout, act=activation, n_layers=num_layers
+            dropout=dropout, act=activation, n_layers=num_layers,
+            # fc_dropout=fc_dropout
         ) for seq_len in self.seq_lens])
-        # self.coeffs = nn.Parameter(torch.normal(1/len(seq_lens), 0.2, (1, len(self.seq_lens))).squeeze())
         
-        # self.pool = MaxReduce()
-        self.pool = ParamReduce(in_dim=len(self.seq_lens))
+        if reduction == 'flatten':
+            self.pool = nn.Flatten(start_dim=-2, end_dim=-1)
+        elif reduction == 'max':
+            self.pool = MaxReduce(dim=-1)
+        elif reduction == 'avg':
+            self.pool = AvgReduce(dim=-1)
+        elif reduction == 'param':
+            self.pool = ParamReduce(in_dim=len(self.seq_lens))
+        else:
+            raise NotImplemented
         
         if activation == 'relu':
             act = nn.ReLU
@@ -120,10 +130,12 @@ class StackTransformer(pl.LightningModule):
             raise NotImplemented
         self.act = act()
         
+        d_head_in = d_head*(len(seq_lens)) if reduction == 'flatten' else d_head
+        
         self.head = MLP(
-            in_channels=d_head, 
+            in_channels=d_head_in, 
             hidden_channels=[d_head]*num_head_layers + [self.num_classes],
-            activation_layer=act, inplace=None)
+            activation_layer=act, dropout=fc_dropout, inplace=None)
         
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
@@ -132,8 +144,6 @@ class StackTransformer(pl.LightningModule):
     def forward(self, xs):
         hs = [model.forward(x) for model, x in zip(self.models, xs)]
         h = torch.stack(hs, axis=-1)
-        # h = torch.amax(h, axis=-1)
-        # h = torch.einsum('bhs,s->bh', h, F.softmax(self.coeffs))
         h = self.pool(h)
         return self.head(self.act(h))
         
@@ -169,6 +179,7 @@ class StackTransformer(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, self.hparams.gamma)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, self.hparams.T_0, self.hparams.T_mult)
         return [optimizer], [scheduler]
     
     
