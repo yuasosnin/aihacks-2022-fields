@@ -1,3 +1,5 @@
+from typing import *
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,8 +9,9 @@ import torchmetrics
 
 from tsai.models.TST import TST as TimeSeriesTransformer
 from tsai.models.InceptionTime import InceptionTime
-from torchvision.ops import MLP
-from .reduce import MaxReduce, AvgReduce, ParamReduce
+# from torchvision.ops import MLP
+from .torch_utils import MLP
+from .torch_utils import MaxReduce, AvgReduce, ParamReduce
 
 
 class StackRNN(pl.LightningModule):
@@ -83,7 +86,6 @@ class StackRNN(pl.LightningModule):
 
 class StackTransformer(pl.LightningModule):
     # seq_lens = [70, 139, 18, 55]
-    # seq_lens = [139, 18, 55]
     num_classes = 7
     
     def __init__(
@@ -133,13 +135,14 @@ class StackTransformer(pl.LightningModule):
         d_head_in = d_head*(len(seq_lens)) if reduction == 'flatten' else d_head
         
         self.head = MLP(
-            in_channels=d_head_in, 
-            hidden_channels=[d_head]*num_head_layers + [self.num_classes],
-            activation_layer=act, dropout=fc_dropout, inplace=None)
+            in_features=d_head_in, 
+            hidden_features=[d_head]*num_head_layers + [self.num_classes],
+            activation=act, dropout=fc_dropout)
         
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
         self.valid_recall = torchmetrics.Recall()
+        self.test_recall = torchmetrics.Recall()
 
     def forward(self, xs):
         hs = [model.forward(x) for model, x in zip(self.models, xs)]
@@ -169,6 +172,15 @@ class StackTransformer(pl.LightningModule):
         self.valid_recall(torch.tensor(output), y)
         self.log('valid_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('valid_recall', self.valid_recall, on_step=True, on_epoch=True)
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        xs, y = batch
+        output = self.forward(xs)
+        loss = self.criterion(output, y)
+        self.test_recall(torch.tensor(output), y)
+        self.log('test_loss', loss.item(), on_step=True, on_epoch=True)
+        self.log('test_recall', self.test_recall, on_step=True, on_epoch=True)
         return loss
 
     def predict_step(self, batch, batch_idx):
@@ -262,3 +274,38 @@ class StackInception(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, self.hparams.gamma)
         return [optimizer], [scheduler]
+
+
+class EnsembleVotingModel(pl.LightningModule):
+    def __init__(self, model_cls: Type[pl.LightningModule], checkpoint_paths: List[str]) -> None:
+        super().__init__()
+        self.models = torch.nn.ModuleList([model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
+        
+        self.criterion = nn.CrossEntropyLoss()
+        self.test_recall = torchmetrics.Recall()
+        
+    def forward(self, xs):
+        outputs = [model(xs) for model in self.models]
+        return torch.stack(outputs).mean(0)
+    
+    # def on_before_batch_transfer(self, batch, dataloader_idx):
+    #     xs, y = batch
+    #     xs = [x.unsqueeze(1).float() for x in xs]
+    #     y = y.long()
+    #     return xs, y
+
+    def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
+        xs, y = batch
+        xs = [x.unsqueeze(1).float() for x in xs]
+        output = self.forward(xs)
+        loss = self.criterion(output, y)
+        self.test_recall(torch.tensor(output), y)
+        self.log('test_loss', loss.item())
+        self.log('test_recall', self.test_recall)
+        return loss
+
+    def predict_step(self, batch, batch_idx):
+        xs, _ = batch
+        xs = [x.unsqueeze(1).float() for x in xs]
+        output = self.forward(xs)
+        return torch.tensor(output)
