@@ -91,7 +91,7 @@ class KFoldLoop(Loop):
         """Used to compute the performance of the ensemble model on the test set."""
         checkpoint_paths = [os.path.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
         # voting_model = EnsembleVotingModel(type(self.trainer.lightning_module), checkpoint_paths)
-        voting_model = self.voting_model(type(self.trainer.lightning_module), checkpoint_paths)
+        voting_model = self.ensemble_model(type(self.trainer.lightning_module), checkpoint_paths)
         voting_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
         self.trainer.strategy.connect(voting_model)

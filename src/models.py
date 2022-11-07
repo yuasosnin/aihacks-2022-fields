@@ -300,8 +300,8 @@ class EnsembleVotingModel(pl.LightningModule):
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.test_recall(torch.tensor(output), y)
-        self.log('test_loss', loss.item())
-        self.log('test_recall', self.test_recall)
+        self.log('test_full_loss', loss.item())
+        self.log('test_full_recall', self.test_recall)
         return loss
 
     def predict_step(self, batch, batch_idx):
