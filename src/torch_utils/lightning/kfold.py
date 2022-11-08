@@ -16,6 +16,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loops.fit_loop import FitLoop
 from pytorch_lightning.loops.loop import Loop
 from pytorch_lightning.trainer.states import TrainerFn
+from pytorch_lightning.utilities.exceptions import MisconfigurationException
 
 
 class BaseKFoldDataModule(pl.LightningDataModule, ABC):
@@ -29,12 +30,14 @@ class BaseKFoldDataModule(pl.LightningDataModule, ABC):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, ensemble_model: pl.LightningModule, num_folds: int, export_path: str) -> None:
+    def __init__(self, ensemble_model: pl.LightningModule, num_folds: int, checkpoint_type='last') -> None:
         super().__init__()
         self.ensemble_model = ensemble_model
         self.num_folds = num_folds
         self.current_fold: int = 0
-        self.export_path = export_path
+        assert checkpoint_type in {'best', 'last'}
+        self._checkpoint_type = checkpoint_type
+        self.checkpoint_paths = []
 
     @property
     def done(self) -> bool:
@@ -50,8 +53,11 @@ class KFoldLoop(Loop):
         """Used to call `setup_folds` from the `BaseKFoldDataModule` instance and store the original weights of the
         model."""
         assert isinstance(self.trainer.datamodule, BaseKFoldDataModule)
+        if self.trainer.checkpoint_callback is None:
+            raise MisconfigurationException("Checkpointer has to be specified to run KFoldLoop")
         self.trainer.datamodule.setup_folds(self.num_folds)
         self.lightning_module_state_dict = deepcopy(self.trainer.lightning_module.state_dict())
+        self.checkpoint_callback_state_dict = deepcopy(self.trainer.checkpoint_callback.state_dict())
 
     def on_advance_start(self, *args: Any, **kwargs: Any) -> None:
         """Used to call `setup_fold_index` from the `BaseKFoldDataModule` instance."""
@@ -76,9 +82,17 @@ class KFoldLoop(Loop):
 
     def on_advance_end(self) -> None:
         """Used to save the weights of the current fold and reset the LightningModule and its optimizers."""
-        self.trainer.save_checkpoint(os.path.join(self.export_path, f"model.{self.current_fold}.pt"))
-        # restore the original weights + optimizers and schedulers.
-        self.trainer.lightning_module.load_state_dict(self.lightning_module_state_dict)
+        # self.trainer.save_checkpoint(os.path.join(self.export_path, f"model.{self.current_fold}.pt"))
+        if self._checkpoint_type == 'best':
+            assert self.trainer.checkpoint_callback.best_model_path
+            self.checkpoint_paths.append(self.trainer.checkpoint_callback.best_model_path)
+        elif self._checkpoint_type == 'last':
+            assert self.trainer.checkpoint_callback.last_model_path
+            self.checkpoint_paths.append(self.trainer.checkpoint_callback.last_model_path)
+        
+        # restore the original weights + optimizers and schedulers + primary checkpoint
+        self.trainer.lightning_module.load_state_dict(deepcopy(self.lightning_module_state_dict))
+        self.trainer.checkpoint_callback.load_state_dict(deepcopy(self.checkpoint_callback_state_dict))
         
         old_state = self.trainer.state.fn  # HACK
         self.trainer.state.fn = TrainerFn.FITTING  
@@ -89,9 +103,8 @@ class KFoldLoop(Loop):
 
     def on_run_end(self) -> None:
         """Used to compute the performance of the ensemble model on the test set."""
-        checkpoint_paths = [os.path.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
-        # voting_model = EnsembleVotingModel(type(self.trainer.lightning_module), checkpoint_paths)
-        voting_model = self.ensemble_model(type(self.trainer.lightning_module), checkpoint_paths)
+        # checkpoint_paths = [os.path.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
+        voting_model = self.ensemble_model(type(self.trainer.lightning_module), self.checkpoint_paths)
         voting_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
         self.trainer.strategy.connect(voting_model)

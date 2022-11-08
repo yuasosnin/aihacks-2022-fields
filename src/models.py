@@ -297,6 +297,7 @@ class EnsembleVotingModel(pl.LightningModule):
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         xs, y = batch
         xs = [x.unsqueeze(1).float() for x in xs]
+        y = y.long()
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.test_recall(torch.tensor(output), y)
