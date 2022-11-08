@@ -36,7 +36,7 @@ def seed_worker(worker_id):
 
 class StackKFoldDataModule(BaseKFoldDataModule):    
     def __init__(
-        self, train_dataframes, pred_dataframes, train_y, batch_size=64, num_workers=0):
+        self, train_dataframes, pred_dataframes, train_y, batch_size=64, num_workers=0, seed=5):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -44,7 +44,7 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         self.train_y = train_y
         self.pred_dataframes = pred_dataframes
         self.g = torch.Generator()
-        self.g.manual_seed(2)
+        self.g.manual_seed(seed)
         
     @staticmethod
     def _get_lens(n, sizes):
