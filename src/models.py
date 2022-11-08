@@ -110,7 +110,7 @@ class StackTransformer(pl.LightningModule):
             c_in=1, c_out=d_head, seq_len=seq_len,
             d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
             dropout=dropout, act=activation, n_layers=num_layers,
-            # fc_dropout=fc_dropout
+            fc_dropout=dropout
         ) for seq_len in self.seq_lens])
         
         if reduction == 'flatten':
