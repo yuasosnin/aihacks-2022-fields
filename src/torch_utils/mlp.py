@@ -1,15 +1,17 @@
 # https://pytorch.org/vision/stable/_modules/torchvision/ops/misc.html#MLP
-# but properly named arguments and no dropout after last layer
 
 from typing import *
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class MLP(nn.Sequential):
     """
     This block implements the multi-layer perceptron (MLP) module.
+    A copy of torchvision.ops.MLP, but with renamed arguments 
+    and no dropout after last layer.
 
     Args:
         in_features (int): Number of features of the input

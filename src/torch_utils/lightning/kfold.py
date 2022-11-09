@@ -2,7 +2,7 @@
 
 from typing import *
 
-import os.path
+# import os.path
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
@@ -30,7 +30,8 @@ class BaseKFoldDataModule(pl.LightningDataModule, ABC):
 
 
 class KFoldLoop(Loop):
-    def __init__(self, ensemble_model: pl.LightningModule, num_folds: int, checkpoint_type='last') -> None:
+    def __init__(self, ensemble_model: pl.LightningModule, num_folds: int, 
+                 checkpoint_type: Literal['last', 'best'] = 'last') -> None:
         super().__init__()
         self.ensemble_model = ensemble_model
         self.num_folds = num_folds
@@ -104,10 +105,10 @@ class KFoldLoop(Loop):
     def on_run_end(self) -> None:
         """Used to compute the performance of the ensemble model on the test set."""
         # checkpoint_paths = [os.path.join(self.export_path, f"model.{f_idx + 1}.pt") for f_idx in range(self.num_folds)]
-        voting_model = self.ensemble_model(type(self.trainer.lightning_module), self.checkpoint_paths)
-        voting_model.trainer = self.trainer
+        ensemble_model = self.ensemble_model(type(self.trainer.lightning_module), self.checkpoint_paths)
+        ensemble_model.trainer = self.trainer
         # This requires to connect the new model and move it the right device.
-        self.trainer.strategy.connect(voting_model)
+        self.trainer.strategy.connect(ensemble_model)
         self.trainer.strategy.model_to_device()
         self.trainer.test_loop.run()
 
