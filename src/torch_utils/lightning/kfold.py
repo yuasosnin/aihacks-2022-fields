@@ -31,7 +31,7 @@ class BaseKFoldDataModule(pl.LightningDataModule, ABC):
 
 class KFoldLoop(Loop):
     def __init__(self, ensemble_model: pl.LightningModule, num_folds: int, 
-                 checkpoint_type: Literal['last', 'best'] = 'last') -> None:
+                 checkpoint_type: str = 'last') -> None:
         super().__init__()
         self.ensemble_model = ensemble_model
         self.num_folds = num_folds
