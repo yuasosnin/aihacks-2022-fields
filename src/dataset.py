@@ -1,6 +1,7 @@
 from typing import *
 
 import numpy as np
+import pandas as pd
 import random
 
 import torch
@@ -16,16 +17,21 @@ class StackDataset(Dataset):
     def __init__(self, *args, static=None, y=None):
         super().__init__()
         # self.dfs = [df.values for df in args]
-        if static is not None:
-            dfs = []
-            for df in args:
-                df = df.values[:,None,:]
+        dfs = []
+        for df in args:
+            if isinstance(df, pd.DataFrame):
+                df = df.values
+            if len(df.shape) == 2:
+                df = df[:,None,:]
+            if static is not None:
                 static_ = np.repeat(static[:,:,None], df.shape[2], axis=2)
                 dfs.append(np.concatenate([df, static_], axis=1))
-            self.dfs = dfs
-        else:
-            self.dfs = [df.values[:,None,:] for df in args]
-        self.y = y.values if y is not None else None
+            else:
+                dfs.append(df)
+        self.dfs = dfs
+        if isinstance(y, pd.Series):
+            y = y.values
+        self.y = y if y is not None else None
         
     def __len__(self):
         return self.dfs[0].shape[0]
