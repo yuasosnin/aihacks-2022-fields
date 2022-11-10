@@ -13,19 +13,28 @@ from .torch_utils.lightning import BaseKFoldDataModule
 
 
 class StackDataset(Dataset):
-    def __init__(self, *args, y=None):
+    def __init__(self, *args, static=None, y=None):
         super().__init__()
-        self.dfs = [df.reset_index(drop=True) for df in args]
-        self.y = y.reset_index(drop=True) if y is not None else None
+        # self.dfs = [df.values for df in args]
+        if static is not None:
+            dfs = []
+            for df in args:
+                df = df.values[:,None,:]
+                static_ = np.repeat(static[:,:,None], df.shape[2], axis=2)
+                dfs.append(np.concatenate([df, static_], axis=1))
+            self.dfs = dfs
+        else:
+            self.dfs = [df.values[:,None,:] for df in args]
+        self.y = y.values if y is not None else None
         
     def __len__(self):
         return self.dfs[0].shape[0]
     
     def __getitem__(self, idx):
-        if self.y is not None:
-            return [df.iloc[idx,:].values[None,:].astype(float) for df in self.dfs], self.y[idx].astype(int)
-        else:
-            return [df.iloc[idx,:].values[None,:].astype(float) for df in self.dfs], np.nan
+        xs = [df[idx,:,:] for df in self.dfs]
+        y = self.y[idx] if self.y is not None else np.nan
+        
+        return xs, y
 
 
 def seed_worker(worker_id):
@@ -36,13 +45,15 @@ def seed_worker(worker_id):
 
 class StackKFoldDataModule(BaseKFoldDataModule):    
     def __init__(
-        self, train_dataframes, pred_dataframes, train_y, batch_size=64, num_workers=0, seed=5):
+        self, train_dataframes, pred_dataframes, train_y, train_static=None, pred_static=None, batch_size=64, num_workers=0, seed=5):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.train_dataframes = train_dataframes 
+        self.train_dataframes = train_dataframes
+        self.train_static = train_static
         self.train_y = train_y
         self.pred_dataframes = pred_dataframes
+        self.pred_static = pred_static
         self.g = torch.Generator()
         self.g.manual_seed(seed)
         
@@ -53,8 +64,8 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         return [train] + rest
         
     def setup(self, stage: Optional[str] = None):
-        dataset = StackDataset(*self.train_dataframes, y=self.train_y)
-        self.pred_dataset = StackDataset(*self.pred_dataframes)
+        dataset = StackDataset(*self.train_dataframes, static=self.train_static, y=self.train_y)
+        self.pred_dataset = StackDataset(*self.pred_dataframes, static=self.pred_static)
         self.train_dataset, self.test_dataset = random_split(
             dataset, self._get_lens(len(dataset), [0.8, 0.2]), generator=self.g)
         self.train_fold, self.val_fold = random_split(

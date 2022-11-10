@@ -17,6 +17,7 @@ class StackTransformer(pl.LightningModule):
     
     def __init__(
             self, 
+            c_in=1,
             seq_lens=[70, 139, 18, 55],
             d_model=64, 
             nhead=1, 
@@ -34,7 +35,7 @@ class StackTransformer(pl.LightningModule):
         self.seq_lens = seq_lens
         
         self.models = nn.ModuleList([TimeSeriesTransformer(
-            c_in=1, c_out=d_head, seq_len=seq_len,
+            c_in=c_in, c_out=d_head, seq_len=seq_len,
             d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
             dropout=dropout, act=activation, n_layers=num_layers,
             fc_dropout=dropout
