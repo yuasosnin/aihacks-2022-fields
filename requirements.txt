@@ -1,0 +1,12 @@
+pandas
+numpy
+geopandas
+geojson
+sklearn
+matplotlib
+ee
+eeconvert
+pytorch
+pytorch_lightning
+torchmetrics
+tsai
