@@ -52,6 +52,8 @@ class StackTransformer(pl.LightningModule):
             hidden_features=[d_head]*num_head_layers + [self.num_classes],
             activation=act, dropout=fc_dropout)
         
+        self.init_weights()
+        
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
         self.valid_recall = torchmetrics.Recall()
@@ -76,7 +78,15 @@ class StackTransformer(pl.LightningModule):
             return ParamReduce(in_dim=len(self.seq_lens))
         else:
             raise ValueError
-
+            
+    def init_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_normal_(layer.weight.data)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias.data, 0.0)
+    
+        
     def forward(self, xs):
         hs = [model.forward(x) for model, x in zip(self.models, xs)]
         h = torch.stack(hs, axis=-1)
@@ -123,7 +133,7 @@ class StackTransformer(pl.LightningModule):
         return torch.tensor(output)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.RAdam(
             self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, self.hparams.gamma)

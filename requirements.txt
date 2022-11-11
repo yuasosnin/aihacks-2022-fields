@@ -1,12 +1,12 @@
-pandas
-numpy
-geopandas
+pandas>=1.3.5
+numpy>=1.21.6
+geopandas>=0.12.*
 geojson
 sklearn
 matplotlib
 ee
 eeconvert
-pytorch
-pytorch_lightning
+pytorch>=1.12.1
+pytorch_lightning>=1.8.*
 torchmetrics
 tsai
