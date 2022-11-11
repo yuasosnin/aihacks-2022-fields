@@ -94,7 +94,7 @@ class StackTransformer(pl.LightningModule):
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.train_recall(torch.tensor(output), y)
-        # wrap into torch.tensot for compatiability with fastai
+        # wrap into torch.tensor for compatiability with fastai
         self.log('train_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('train_recall', self.train_recall, on_step=True, on_epoch=True)
         return loss
@@ -127,8 +127,6 @@ class StackTransformer(pl.LightningModule):
             self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
         scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer, self.hparams.gamma)
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        #     optimizer, self.hparams.T_0, self.hparams.T_mult)
         return [optimizer], [scheduler]
 
 
