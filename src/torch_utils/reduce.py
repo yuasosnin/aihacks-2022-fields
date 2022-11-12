@@ -12,7 +12,7 @@ class MaxReduce(nn.Module):
     def __init__(self, dim: int = -1):
         super().__init__()
         self.dim = dim
-            
+    
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         return torch.amax(h, axis=self.dim)
     
@@ -24,9 +24,21 @@ class AvgReduce(nn.Module):
     def __init__(self, dim: int = -1):
         super().__init__()
         self.dim = dim
-            
+    
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         return torch.mean(h, axis=self.dim)
+    
+    
+class SumReduce(nn.Module):
+    """
+    Reduces out given dimension of a tensor by taking sum across its values.
+    """
+    def __init__(self, dim: int = -1):
+        super().__init__()
+        self.dim = dim
+    
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        return torch.sum(h, axis=self.dim)
 
 
 class ParamReduce(nn.Module):
@@ -44,6 +56,6 @@ class ParamReduce(nn.Module):
     @property
     def coeffs(self) -> torch.Tensor:
         return F.softmax(self._coeffs)
-        
+    
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         return torch.sum(h*self.coeffs, axis=self.dim)

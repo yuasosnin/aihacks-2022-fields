@@ -20,5 +20,5 @@ class PrintMetricsCallback(pl.callbacks.Callback):
         for metric in metrics:
             if metric in metrics_dict:
                 print(f'{metric}:', metrics_dict[metric].item())
-        print('-' * 80)
+        print(u'\u2500' * 80)
         self.epoch += 1

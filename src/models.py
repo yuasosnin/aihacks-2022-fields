@@ -3,6 +3,8 @@ from typing import *
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import Adam, RAdam
+from torch.optim.lr_scheduler import ExponentialLR
 import pytorch_lightning as pl
 import torchmetrics
 
@@ -27,7 +29,7 @@ class StackTransformer(pl.LightningModule):
             num_head_layers=1,
             dropout=0, 
             fc_dropout=0,
-            activation='relu',
+            activation=nn.ReLU,
             reduction='avg',
             **hparams):
         super().__init__()
@@ -42,31 +44,19 @@ class StackTransformer(pl.LightningModule):
         ) for seq_len in self.seq_lens])
         
         self.pool = self._get_pool(reduction)
-        act = self._get_activation(activation)
-        self.act = act()
+        # self.act = activation()
         
         d_head_in = d_head*(len(seq_lens)) if reduction == 'flatten' else d_head
-        
         self.head = MLP(
             in_features=d_head_in, 
             hidden_features=[d_head]*num_head_layers + [self.num_classes],
-            activation=act, dropout=fc_dropout)
-        
-        self.init_weights()
+            activation=activation, dropout=fc_dropout, act_first=True)
         
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
         self.valid_recall = torchmetrics.Recall()
         self.test_recall = torchmetrics.Recall()
-        
-    def _get_activation(self, activation):
-        if activation == 'relu':
-            return nn.ReLU
-        elif activation == 'gelu':
-            return nn.GELU
-        else:
-            return activation
-            
+    
     def _get_pool(self, reduction):
         if reduction == 'flatten':
             return nn.Flatten(start_dim=-2, end_dim=-1)
@@ -74,25 +64,20 @@ class StackTransformer(pl.LightningModule):
             return MaxReduce(dim=-1)
         elif reduction == 'avg':
             return AvgReduce(dim=-1)
+        elif reduction == 'sum':
+            return SumReduce(dim=-1)
         elif reduction == 'param':
             return ParamReduce(in_dim=len(self.seq_lens))
         else:
             raise ValueError
-            
-    def init_weights(self):
-        for layer in self.modules():
-            if isinstance(layer, nn.Linear):
-                nn.init.xavier_normal_(layer.weight.data)
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias.data, 0.0)
     
-        
+    
     def forward(self, xs):
         hs = [model.forward(x) for model, x in zip(self.models, xs)]
         h = torch.stack(hs, axis=-1)
         h = self.pool(h)
-        return self.head(self.act(h))
-        
+        return self.head(h)
+    
     def on_before_batch_transfer(self, batch, dataloader_idx):
         xs, y = batch
         xs = [x.float() for x in xs]
@@ -103,12 +88,12 @@ class StackTransformer(pl.LightningModule):
         xs, y = batch
         output = self.forward(xs)
         loss = self.criterion(output, y)
-        self.train_recall(torch.tensor(output), y)
         # wrap into torch.tensor for compatiability with fastai
+        self.train_recall(torch.tensor(output), y)
         self.log('train_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('train_recall', self.train_recall, on_step=True, on_epoch=True)
         return loss
-
+    
     def validation_step(self, batch, batch_idx):
         xs, y = batch
         output = self.forward(xs)
@@ -126,16 +111,16 @@ class StackTransformer(pl.LightningModule):
         self.log('test_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('test_recall', self.test_recall, on_step=True, on_epoch=True)
         return loss
-
+    
     def predict_step(self, batch, batch_idx):
         xs, _ = batch
         output = self.forward(xs)
         return torch.tensor(output)
-
+    
     def configure_optimizers(self):
-        optimizer = torch.optim.RAdam(
+        optimizer = RAdam(
             self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        scheduler = ExponentialLR(
             optimizer, self.hparams.gamma)
         return [optimizer], [scheduler]
 
@@ -143,7 +128,7 @@ class StackTransformer(pl.LightningModule):
 class EnsembleVotingModel(pl.LightningModule):
     def __init__(self, model_cls: pl.LightningModule, checkpoint_paths: List[str]) -> None:
         super().__init__()
-        self.models = torch.nn.ModuleList(
+        self.models = nn.ModuleList(
             [model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
         
         self.criterion = nn.CrossEntropyLoss()
@@ -153,12 +138,13 @@ class EnsembleVotingModel(pl.LightningModule):
         outputs = [model(xs) for model in self.models]
         return torch.stack(outputs).mean(0)
     
+    # doesnt work for some reason
     # def on_before_batch_transfer(self, batch, dataloader_idx):
     #     xs, y = batch
     #     xs = [x.float() for x in xs]
     #     y = y.long()
     #     return xs, y
-
+    
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         xs, y = batch
         xs = [x.float() for x in xs]
@@ -166,11 +152,11 @@ class EnsembleVotingModel(pl.LightningModule):
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.test_recall(torch.tensor(output), y)
+        # can't be called 'test_loss' and 'test_recall'!
         self.log('test_full_loss', loss.item())
         self.log('test_full_recall', self.test_recall)
-        # can't be called 'test_loss' and 'test_recall'!
         return loss
-
+    
     def predict_step(self, batch, batch_idx):
         xs, _ = batch
         xs = [x.float() for x in xs]
