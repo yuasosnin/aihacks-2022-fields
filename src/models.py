@@ -19,7 +19,7 @@ class StackTransformer(pl.LightningModule):
     
     def __init__(
             self, 
-            c_in=1,
+            c_ins=[1,1,1,1],
             seq_lens=[70, 139, 18, 55],
             d_model=64, 
             nhead=1, 
@@ -41,7 +41,7 @@ class StackTransformer(pl.LightningModule):
             d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
             dropout=dropout, act=activation, n_layers=num_layers,
             fc_dropout=dropout
-        ) for seq_len in self.seq_lens])
+        ) for seq_len, c_in in zip(self.seq_lens, c_ins)])
         
         self.pool = self._get_pool(reduction)
         # self.act = activation()
@@ -78,14 +78,14 @@ class StackTransformer(pl.LightningModule):
         h = self.pool(h)
         return self.head(h)
     
-    def on_before_batch_transfer(self, batch, dataloader_idx):
-        xs, y = batch
-        xs = [x.float() for x in xs]
-        y = y.long()
-        return xs, y
+    # def on_before_batch_transfer(self, batch, dataloader_idx):
+    #     xs, y = batch
+    #     xs = [x.float() for x in xs]
+    #     y = y.long()
+    #     return xs, y
     
     def training_step(self, batch, batch_idx):
-        xs, y = batch
+        xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
         # wrap into torch.tensor for compatiability with fastai
@@ -95,7 +95,7 @@ class StackTransformer(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
-        xs, y = batch
+        xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.valid_recall(torch.tensor(output), y)
@@ -104,7 +104,7 @@ class StackTransformer(pl.LightningModule):
         return loss
     
     def test_step(self, batch, batch_idx):
-        xs, y = batch
+        xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.test_recall(torch.tensor(output), y)
@@ -113,7 +113,7 @@ class StackTransformer(pl.LightningModule):
         return loss
     
     def predict_step(self, batch, batch_idx):
-        xs, _ = batch
+        xs = batch
         output = self.forward(xs)
         return torch.tensor(output)
     
@@ -146,9 +146,7 @@ class EnsembleVotingModel(pl.LightningModule):
     #     return xs, y
     
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
-        xs, y = batch
-        xs = [x.float() for x in xs]
-        y = y.long()
+        xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
         self.test_recall(torch.tensor(output), y)
@@ -158,7 +156,7 @@ class EnsembleVotingModel(pl.LightningModule):
         return loss
     
     def predict_step(self, batch, batch_idx):
-        xs, _ = batch
+        xs = batch
         xs = [x.float() for x in xs]
         output = self.forward(xs)
         return torch.tensor(output)
