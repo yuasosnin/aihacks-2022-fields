@@ -31,17 +31,27 @@ class StackTransformer(pl.LightningModule):
             fc_dropout=0,
             activation=nn.ReLU,
             reduction='avg',
+            const=False,
+            c_in_const=None,
+            num_const_leayers=0,
             **hparams):
         super().__init__()
         self.save_hyperparameters()
         self.seq_lens = seq_lens
         
-        self.models = nn.ModuleList([TimeSeriesTransformer(
+        self.ts_models = nn.ModuleList([TimeSeriesTransformer(
             c_in=c_in, c_out=d_head, seq_len=seq_len,
             d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
             dropout=dropout, act=activation, n_layers=num_layers,
             fc_dropout=fc_dropout
         ) for seq_len, c_in in zip(self.seq_lens, c_ins)])
+        
+        self.const = const
+        if self.const:
+            self.const_model = MLP(
+                in_features=c_in_const,
+                hidden_features=[d_head]*num_const_leayers + [d_head],
+                activation=activation, dropout=dropout)
         
         self.pool = self._get_pool(reduction)
         # self.act = activation()
@@ -73,16 +83,15 @@ class StackTransformer(pl.LightningModule):
     
     
     def forward(self, xs):
-        hs = [model.forward(x) for model, x in zip(self.models, xs)]
+        # zip will take shortest, const ignored
+        hs = [model.forward(x) for model, x in zip(self.ts_models, xs)]
+        if self.const:
+            # process it separately
+            hs.append(self.const_model.forward(xs[-1]))
         h = torch.stack(hs, axis=-1)
+        self._norms = torch.tensor(torch.norm(h, dim=1).mean(dim=0))
         h = self.pool(h)
         return self.head(h)
-    
-    # def on_before_batch_transfer(self, batch, dataloader_idx):
-    #     xs, y = batch
-    #     xs = [x.float() for x in xs]
-    #     y = y.long()
-    #     return xs, y
     
     def training_step(self, batch, batch_idx):
         xs, y = batch[:-1], batch[-1]
@@ -101,6 +110,8 @@ class StackTransformer(pl.LightningModule):
         self.valid_recall(torch.tensor(output), y)
         self.log('valid_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('valid_recall', self.valid_recall, on_step=True, on_epoch=True)
+        for i, n in enumerate(self._norms):
+            self.log(f'valid_norm_{i}', n, on_step=False, on_epoch=True)
         return loss
     
     def test_step(self, batch, batch_idx):
@@ -128,22 +139,15 @@ class StackTransformer(pl.LightningModule):
 class EnsembleVotingModel(pl.LightningModule):
     def __init__(self, model_cls: pl.LightningModule, checkpoint_paths: List[str]) -> None:
         super().__init__()
-        self.models = nn.ModuleList(
+        self.ts_models = nn.ModuleList(
             [model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
         
         self.criterion = nn.CrossEntropyLoss()
         self.test_recall = torchmetrics.Recall()
         
     def forward(self, xs):
-        outputs = [model(xs) for model in self.models]
+        outputs = [model(xs) for model in self.ts_models]
         return torch.stack(outputs).mean(0)
-    
-    # doesnt work for some reason
-    # def on_before_batch_transfer(self, batch, dataloader_idx):
-    #     xs, y = batch
-    #     xs = [x.float() for x in xs]
-    #     y = y.long()
-    #     return xs, y
     
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         xs, y = batch[:-1], batch[-1]
@@ -157,6 +161,5 @@ class EnsembleVotingModel(pl.LightningModule):
     
     def predict_step(self, batch, batch_idx):
         xs = batch
-        xs = [x.float() for x in xs]
         output = self.forward(xs)
         return torch.tensor(output)

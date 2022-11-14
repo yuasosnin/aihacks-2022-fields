@@ -39,9 +39,9 @@ def process_data(data):
     except KeyError:
         data_id = data[['id', 'area', 'geometry']].copy()
         
-    data_id['centroid'] = data_id['geometry'].to_crs(4327).centroid.copy()
-    data_id['lat'] = data_id['centroid'].apply(lambda x: x.coords[0][0]).copy()
-    data_id['lon'] = data_id['centroid'].apply(lambda x: x.coords[0][1]).copy()
+    data_id['centroid'] = data_id['geometry'].to_crs('+proj=cea').centroid.to_crs(4326).copy()
+    data_id['lon'] = data_id['centroid'].apply(lambda x: x.coords[0][0]).copy()
+    data_id['lat'] = data_id['centroid'].apply(lambda x: x.coords[0][1]).copy()
     data_id = data_id.drop('centroid', axis=1).copy()
     
     return data_ts, data_id
