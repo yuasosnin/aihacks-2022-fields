@@ -11,7 +11,8 @@ import torchmetrics
 from tsai.models.TST import TST as TimeSeriesTransformer
 # from torchvision.ops import MLP
 from .torch_utils import MLP
-from .torch_utils import MaxReduce, AvgReduce, ParamReduce
+from .torch_utils import MaxReduce, AvgReduce, SumReduce, ParamReduce
+from .loss import SCELoss
 
 
 class StackTransformer(pl.LightningModule):
@@ -34,6 +35,7 @@ class StackTransformer(pl.LightningModule):
             const=False,
             c_in_const=None,
             num_const_leayers=0,
+            loss_coeffs=[1,1],
             **hparams):
         super().__init__()
         self.save_hyperparameters()
@@ -62,7 +64,8 @@ class StackTransformer(pl.LightningModule):
             hidden_features=[d_head]*num_head_layers + [self.num_classes],
             activation=activation, dropout=fc_dropout, act_first=True)
         
-        self.criterion = nn.CrossEntropyLoss()
+        # self.criterion = nn.CrossEntropyLoss()
+        self.criterion = SCELoss(*loss_coeffs, num_classes=self.num_classes)
         self.train_recall = torchmetrics.Recall()
         self.valid_recall = torchmetrics.Recall()
         self.test_recall = torchmetrics.Recall()
