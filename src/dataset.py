@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, Subset, TensorDataset, DataLoader, random_split
 import pytorch_lightning as pl
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 
 from .torch_utils.lightning import BaseKFoldDataModule
 
@@ -78,23 +78,35 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         
     def setup(self, stage: Optional[str] = None):
         # split into train and test
-        self.g.manual_seed(self.seed)
-        self.train_dataset, self.test_dataset = random_split(
-            self.dataset, self._get_lens(len(self.dataset), [0.8, 0.2]), generator=self.g)
+        y = self.dataset.tensors[-1]
+        self.train_idx, self.test_idx = train_test_split(
+            np.arange(len(self.dataset)), test_size=0.2, 
+            stratify=y, random_state=self.seed)
+        
+        self.train_dataset = Subset(self.dataset, self.train_idx)
+        self.test_dataset = Subset(self.dataset, self.test_idx)
+        
         # normalize based on test
         self._normalize()
+        
         # split again with normalized tansors
-        self.g.manual_seed(self.seed)
-        self.train_dataset, self.test_dataset = random_split(
-            self.dataset, self._get_lens(len(self.dataset), [0.8, 0.2]), generator=self.g)
+        self.train_dataset = Subset(self.dataset, self.train_idx)
+        self.test_dataset = Subset(self.dataset, self.test_idx)
+            
         # split initially into train and val to use outside of KFoldLoop
-        self.train_fold, self.val_fold = random_split(
-            self.train_dataset, self._get_lens(len(self.train_dataset), [0.9, 0.1]), generator=self.g)
+        train_train_idx, val_idx = train_test_split(
+            np.arange(len(self.train_idx)), test_size=0.1, 
+            stratify=y[self.train_idx], random_state=self.seed)
+        
+        self.train_fold = Subset(self.train_dataset, train_train_idx)
+        self.val_fold = Subset(self.train_dataset, val_idx)
     
 
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
-        self.splits = [split for split in KFold(num_folds).split(range(len(self.train_dataset)))]
+        y = self.dataset.tensors[-1][self.train_idx]
+        splits = StratifiedKFold(num_folds).split(np.arange(len(self.train_dataset)), y=y)
+        self.splits = list(splits)
 
     def setup_fold_index(self, fold_index: int) -> None:
         train_indices, val_indices = self.splits[fold_index]

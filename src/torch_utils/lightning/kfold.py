@@ -10,7 +10,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset, Subset, DataLoader, random_split
-from sklearn.model_selection import KFold
 
 import pytorch_lightning as pl
 from pytorch_lightning.loops.fit_loop import FitLoop
