@@ -21,7 +21,7 @@ def seed_worker(worker_id):
 
 class StackKFoldDataModule(BaseKFoldDataModule):    
     def __init__(
-        self, train_dataset, pred_dataset, const, batch_size=64, num_workers=0, seed=5):
+        self, train_dataset, pred_dataset, const, batch_size=64, num_workers=0, stratified=True, seed=5):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -29,14 +29,9 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         self.pred_dataset = pred_dataset
         self.const = const
         self.seed = seed
+        self.stratified = stratified
         self.g = torch.Generator()
         self.g.manual_seed(seed)
-        
-    @staticmethod
-    def _get_lens(n, sizes):
-        rest = [int(n*s) for s in sizes[1:]]
-        train = n - sum(rest)
-        return [train] + rest
     
     def _calc_ts_stats(self, train_dataset):
         n_ds = len(self.dataset.tensors) - 1 - self.const
@@ -81,7 +76,7 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         y = self.dataset.tensors[-1]
         self.train_idx, self.test_idx = train_test_split(
             np.arange(len(self.dataset)), test_size=0.2, 
-            stratify=y, random_state=self.seed)
+            stratify=(y if self.stratified else None), random_state=self.seed)
         
         self.train_dataset = Subset(self.dataset, self.train_idx)
         self.test_dataset = Subset(self.dataset, self.test_idx)
@@ -96,7 +91,7 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         # split initially into train and val to use outside of KFoldLoop
         train_train_idx, val_idx = train_test_split(
             np.arange(len(self.train_idx)), test_size=0.1, 
-            stratify=y[self.train_idx], random_state=self.seed)
+            stratify=(y[self.train_idx] if self.stratified else None), random_state=self.seed)
         
         self.train_fold = Subset(self.train_dataset, train_train_idx)
         self.val_fold = Subset(self.train_dataset, val_idx)
@@ -105,7 +100,10 @@ class StackKFoldDataModule(BaseKFoldDataModule):
     def setup_folds(self, num_folds: int) -> None:
         self.num_folds = num_folds
         y = self.dataset.tensors[-1][self.train_idx]
-        splits = StratifiedKFold(num_folds).split(np.arange(len(self.train_dataset)), y=y)
+        if self.stratified:
+            splits = StratifiedKFold(num_folds).split(np.arange(len(self.train_dataset)), y=y)
+        else:
+            splits = KFold(num_folds).split(np.arange(len(self.train_dataset)))
         self.splits = list(splits)
 
     def setup_fold_index(self, fold_index: int) -> None:

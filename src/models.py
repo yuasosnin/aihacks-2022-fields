@@ -12,7 +12,7 @@ from tsai.models.TST import TST as TimeSeriesTransformer
 # from torchvision.ops import MLP
 from .torch_utils import MLP
 from .torch_utils import MaxReduce, AvgReduce, SumReduce, ParamReduce
-from .loss import SCELoss
+from .losses import SCELoss, CDBLoss
 
 
 class StackTransformer(pl.LightningModule):
@@ -35,7 +35,7 @@ class StackTransformer(pl.LightningModule):
             const=False,
             c_in_const=None,
             num_const_leayers=0,
-            loss_coeffs=[1,1],
+            loss_weights=None,
             **hparams):
         super().__init__()
         self.save_hyperparameters()
@@ -64,8 +64,14 @@ class StackTransformer(pl.LightningModule):
             hidden_features=[d_head]*num_head_layers + [self.num_classes],
             activation=activation, dropout=fc_dropout, act_first=True)
         
-        # self.criterion = nn.CrossEntropyLoss()
-        self.criterion = SCELoss(*loss_coeffs, num_classes=self.num_classes)
+        if loss_weights is not None:
+            loss_weights = torch.tensor(loss_weights, dtype=torch.float32)
+        self.criterion = nn.CrossEntropyLoss(weight=loss_weights)
+        # self.criterion = SCELoss(*loss_coeffs, num_classes=self.num_classes)
+        # class_acc = torch.ones(self.num_classes) / self.num_classes
+        # self.criterion = CDBLoss(class_difficulty=1-class_acc, device=self.device, tau='dynamic')
+        # self.valid_acc = torchmetrics.classification.MulticlassAccuracy(num_classes=self.num_classes, average=None)
+        
         self.train_recall = torchmetrics.Recall()
         self.valid_recall = torchmetrics.Recall()
         self.test_recall = torchmetrics.Recall()
@@ -115,6 +121,12 @@ class StackTransformer(pl.LightningModule):
         self.log('valid_recall', self.valid_recall, on_step=True, on_epoch=True)
         for i, n in enumerate(self._norms):
             self.log(f'valid_norm_{i}', n, on_step=False, on_epoch=True)
+        
+        # update DCBLoss
+        if isinstance(self.criterion, CDBLoss):
+            class_acc = self.valid_acc(torch.tensor(output), y)
+            self.criterion.update_weights(class_difficulty=1-class_acc, device=self.device)
+            
         return loss
     
     def test_step(self, batch, batch_idx):
