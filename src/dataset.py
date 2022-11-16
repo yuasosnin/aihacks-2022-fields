@@ -19,9 +19,9 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-class StackKFoldDataModule(BaseKFoldDataModule):    
+class StackKFoldDataModule(BaseKFoldDataModule):
     def __init__(
-        self, train_dataset, pred_dataset, const, batch_size=64, num_workers=0, stratified=True, seed=5):
+        self, train_dataset, pred_dataset, const, batch_size=64, num_workers=0, stratified=False, seed=1):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -57,7 +57,7 @@ class StackKFoldDataModule(BaseKFoldDataModule):
             pred_tensors = self.pred_dataset.tensors
         means, stds = self._calc_ts_stats(self.train_dataset)
         
-        train_tensors = [(ds-means[i])/stds[i] for i, ds in enumerate(train_tensors)]# + [y_tensor]
+        train_tensors = [(ds-means[i])/stds[i] for i, ds in enumerate(train_tensors)]
         pred_tensors = [(ds-means[i])/stds[i] for i, ds in enumerate(pred_tensors)]
 
         if self.const:
@@ -101,9 +101,9 @@ class StackKFoldDataModule(BaseKFoldDataModule):
         self.num_folds = num_folds
         y = self.dataset.tensors[-1][self.train_idx]
         if self.stratified:
-            splits = StratifiedKFold(num_folds).split(np.arange(len(self.train_dataset)), y=y)
+            splits = StratifiedKFold(num_folds, shuffle=True, random_state=self.seed).split(np.arange(len(self.train_dataset)), y=y)
         else:
-            splits = KFold(num_folds).split(np.arange(len(self.train_dataset)))
+            splits = KFold(num_folds, shuffle=True, random_state=self.seed).split(np.arange(len(self.train_dataset)))
         self.splits = list(splits)
 
     def setup_fold_index(self, fold_index: int) -> None:
