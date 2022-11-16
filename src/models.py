@@ -40,6 +40,7 @@ class StackTransformer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.seq_lens = seq_lens
+        self._DEBUG = False
         
         self.ts_models = nn.ModuleList([TimeSeriesTransformer(
             c_in=c_in, c_out=d_head, seq_len=seq_len,
@@ -56,6 +57,7 @@ class StackTransformer(pl.LightningModule):
                 activation=activation, dropout=dropout)
         
         self.pool = self._get_pool(reduction)
+        # self.norm = nn.BatchNorm1d(num_features=d_head)
         # self.act = activation()
         
         d_head_in = d_head*(len(seq_lens)) if reduction == 'flatten' else d_head
@@ -100,7 +102,11 @@ class StackTransformer(pl.LightningModule):
         h = torch.stack(hs, axis=-1)
         self._norms = torch.tensor(torch.norm(h, dim=1).mean(dim=0))
         h = self.pool(h)
-        return self.head(h)
+        # h = self.norm(h)
+        if not self._DEBUG:
+            return self.head(h)
+        else:
+            return self.head(h), h, hs
     
     def training_step(self, batch, batch_idx):
         xs, y = batch[:-1], batch[-1]
