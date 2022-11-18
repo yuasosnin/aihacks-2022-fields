@@ -7,7 +7,7 @@ from torch.optim import Adam, RAdam
 from torch.optim.lr_scheduler import ExponentialLR
 import pytorch_lightning as pl
 import torchmetrics
-
+import signatory
 from tsai.models.TST import TST as TimeSeriesTransformer
 # from torchvision.ops import MLP
 from .torch_utils import MLP
@@ -34,6 +34,8 @@ class StackTransformer(pl.LightningModule):
             const=False,
             c_in_const=None,
             num_const_leayers=0,
+            sig=False,
+            sig_depth=7,
             **hparams):
         super().__init__()
         self.save_hyperparameters()
@@ -47,10 +49,25 @@ class StackTransformer(pl.LightningModule):
             fc_dropout=fc_dropout
         ) for seq_len, c_in in zip(self.seq_lens, c_ins)])
         
+        self.sig = sig
+        sig_channels = 0
+        if self.sig:
+            augment = signatory.Augment(
+                in_channels=1,
+                layer_sizes=(),
+                kernel_size=1,
+                include_original=True,
+                include_time=True)
+            signature = signatory.Signature(depth=sig_depth)
+            self.sig_model = nn.Sequential(augment, signature)
+            # +1 because signatory.Augment is used to add time as well
+            sig_channels = signatory.signature_channels(
+                channels=2, depth=sig_depth)
+        
         self.const = const
         if self.const:
             self.const_model = MLP(
-                in_features=c_in_const,
+                in_features=c_in_const+sig_channels,
                 hidden_features=[d_head]*num_const_leayers + [d_head],
                 activation=activation, dropout=dropout)
         
@@ -88,7 +105,13 @@ class StackTransformer(pl.LightningModule):
         hs = [model.forward(x) for model, x in zip(self.ts_models, xs)]
         if self.const:
             # process it separately
-            hs.append(self.const_model.forward(xs[-1]))
+            if self.sig:
+                sig = self.sig_model(xs[0].permute(0,2,1))
+                x_const = torch.cat([xs[-1], sig], dim=1)
+            else:
+                x_const = xs[-1]
+            h_const = self.const_model.forward(x_const)
+            hs.append(h_const)
         h = torch.stack(hs, axis=-1)
         self._norms = torch.tensor(torch.norm(h, dim=1).mean(dim=0))
         h = self.pool(h)
@@ -133,10 +156,23 @@ class StackTransformer(pl.LightningModule):
         return torch.tensor(output)
     
     def configure_optimizers(self):
-        optimizer = RAdam(
-            self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
-        scheduler = ExponentialLR(
-            optimizer, self.hparams.gamma)
+        param_groups = [
+            dict(
+                params=self.ts_models.parameters(), 
+                lr=self.hparams.lr, 
+                weight_decay=self.hparams.wd),
+            dict(
+                params=self.head.parameters(), 
+                lr=self.hparams.lr*10, 
+                weight_decay=self.hparams.wd*10),
+            dict(
+                params=self.const_model.parameters(), 
+                lr=self.hparams.lr*10, 
+                weight_decay=self.hparams.wd*10),
+        ]
+
+        optimizer = RAdam(param_groups)
+        scheduler = ExponentialLR(optimizer, self.hparams.gamma)
         return [optimizer], [scheduler]
 
 

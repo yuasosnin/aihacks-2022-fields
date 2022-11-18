@@ -6,7 +6,8 @@ sklearn
 matplotlib
 ee
 eeconvert
-pytorch>=1.12.1
-pytorch_lightning>=1.8.*
+pytorch==1.11
+pytorch_lightning>=1.8
+signatory
 torchmetrics
 tsai
