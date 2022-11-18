@@ -52,14 +52,13 @@ class StackTransformer(pl.LightningModule):
         self.sig = sig
         sig_channels = 0
         if self.sig:
-            augment = signatory.Augment(
+            self.augment = signatory.Augment(
                 in_channels=1,
                 layer_sizes=(),
                 kernel_size=1,
                 include_original=True,
                 include_time=True)
-            signature = signatory.Signature(depth=sig_depth)
-            self.sig_model = nn.Sequential(augment, signature)
+            self.signature = signatory.Signature(depth=sig_depth)
             # +1 because signatory.Augment is used to add time as well
             sig_channels = signatory.signature_channels(
                 channels=2, depth=sig_depth)
@@ -106,7 +105,8 @@ class StackTransformer(pl.LightningModule):
         if self.const:
             # process it separately
             if self.sig:
-                sig = self.sig_model(xs[0].permute(0,2,1))
+                sig = self.augment(xs[0].permute(0,2,1))
+                sig = self.signature(sig, basepoint=True)
                 x_const = torch.cat([xs[-1], sig], dim=1)
             else:
                 x_const = xs[-1]
