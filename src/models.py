@@ -11,7 +11,6 @@ import torchmetrics
 from tsai.models.TST import TST as TimeSeriesTransformer
 # from torchvision.ops import MLP
 from .torch_utils import MLP
-from .torch_utils import MaxReduce, AvgReduce, SumReduce, ParamReduce
 
 
 class StackTransformer(pl.LightningModule):
@@ -30,8 +29,7 @@ class StackTransformer(pl.LightningModule):
             dropout=0, 
             fc_dropout=0,
             activation=nn.ReLU,
-            reduction='avg',
-            const=False,
+            const_features=False,
             c_in_const=None,
             num_const_leayers=0,
             **hparams):
@@ -47,15 +45,12 @@ class StackTransformer(pl.LightningModule):
             fc_dropout=fc_dropout
         ) for seq_len, c_in in zip(self.seq_lens, c_ins)])
         
-        self.const = const
+        self.const = const_features
         if self.const:
             self.const_model = MLP(
                 in_features=c_in_const,
                 hidden_features=[d_head]*num_const_leayers + [d_head],
                 activation=activation, dropout=dropout)
-        
-        self.pool = self._get_pool(reduction)
-        # self.act = activation()
         
         d_head_in = d_head*(len(seq_lens)) if reduction == 'flatten' else d_head
         self.head = MLP(
@@ -66,23 +61,9 @@ class StackTransformer(pl.LightningModule):
         self.criterion = nn.CrossEntropyLoss()
         self.train_recall = torchmetrics.Recall()
         self.valid_recall = torchmetrics.Recall()
-        self.test_recall = torchmetrics.Recall()
+        self.test_recall = torchmetrics.Recall()    
     
-    def _get_pool(self, reduction):
-        if reduction == 'flatten':
-            return nn.Flatten(start_dim=-2, end_dim=-1)
-        elif reduction == 'max':
-            return MaxReduce(dim=-1)
-        elif reduction == 'avg':
-            return AvgReduce(dim=-1)
-        elif reduction == 'sum':
-            return SumReduce(dim=-1)
-        elif reduction == 'param':
-            return ParamReduce(in_dim=len(self.seq_lens))
-        else:
-            raise ValueError
-    
-    
+
     def forward(self, xs):
         # zip will take shortest, const ignored
         hs = [model.forward(x) for model, x in zip(self.ts_models, xs)]
@@ -91,7 +72,7 @@ class StackTransformer(pl.LightningModule):
             hs.append(self.const_model.forward(xs[-1]))
         h = torch.stack(hs, axis=-1)
         self._norms = torch.tensor(torch.norm(h, dim=1).mean(dim=0))
-        h = self.pool(h)
+        h = torch.mean(h, axis=-1)
         if not self._DEBUG:
             return self.head(h)
         else:
@@ -133,10 +114,22 @@ class StackTransformer(pl.LightningModule):
         return torch.tensor(output)
     
     def configure_optimizers(self):
-        optimizer = RAdam(
-            self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
-        scheduler = ExponentialLR(
-            optimizer, self.hparams.gamma)
+        param_groups = [
+            dict(
+                params=self.ts_models.parameters(), 
+                lr=self.hparams.lr, 
+                weight_decay=self.hparams.wd),
+            dict(
+                params=self.head.parameters(), 
+                lr=self.hparams.lr, 
+                weight_decay=self.hparams.wd),
+            dict(
+                params=self.const_model.parameters(), 
+                lr=self.hparams.lr*10, 
+                weight_decay=self.hparams.wd*10),
+        ]
+        optimizer = RAdam(param_groups)
+        scheduler = ExponentialLR(optimizer, self.hparams.gamma)
         return [optimizer], [scheduler]
 
 
@@ -149,7 +142,7 @@ class EnsembleVotingModel(pl.LightningModule):
         
         self.criterion = nn.CrossEntropyLoss()
         self.test_recall = torchmetrics.Recall()
-        
+    
     def forward(self, xs):
         outputs = [model(xs) for model in self.models]
         if self.mode == 'mean':
