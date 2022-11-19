@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, Subset, TensorDataset, DataLoader, random_
 import pytorch_lightning as pl
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 
-from .torch_utils.lightning import BaseKFoldDataModule
+from .torch_utils import BaseKFoldDataModule
 
 
 def seed_worker(worker_id):

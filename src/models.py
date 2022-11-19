@@ -52,9 +52,8 @@ class StackTransformer(pl.LightningModule):
                 hidden_features=[d_head]*num_const_leayers + [d_head],
                 activation=activation, dropout=dropout)
         
-        d_head_in = d_head*(len(seq_lens)) if reduction == 'flatten' else d_head
         self.head = MLP(
-            in_features=d_head_in, 
+            in_features=d_head, 
             hidden_features=[d_head]*num_head_layers + [self.num_classes],
             activation=activation, dropout=fc_dropout, act_first=True)
         
@@ -71,7 +70,7 @@ class StackTransformer(pl.LightningModule):
             # process it separately
             hs.append(self.const_model.forward(xs[-1]))
         h = torch.stack(hs, axis=-1)
-        self._norms = torch.tensor(torch.norm(h, dim=1).mean(dim=0))
+        self._norms = torch.norm(h, dim=1).mean(dim=0)
         h = torch.mean(h, axis=-1)
         if not self._DEBUG:
             return self.head(h)
