@@ -8,7 +8,8 @@ from torch.optim.lr_scheduler import ExponentialLR
 import pytorch_lightning as pl
 import torchmetrics
 
-from tsai.models.TST import TST as TimeSeriesTransformer
+# from tsai.models.TST import TST as TimeSeriesTransformer
+from .tst import TST as TimeSeriesTransformer
 # from torchvision.ops import MLP
 from .torch_utils import MLP
 
@@ -58,9 +59,9 @@ class StackTransformer(pl.LightningModule):
             activation=activation, dropout=fc_dropout, act_first=True)
         
         self.criterion = nn.CrossEntropyLoss()
-        self.train_recall = torchmetrics.Recall()
-        self.valid_recall = torchmetrics.Recall()
-        self.test_recall = torchmetrics.Recall()    
+        self.train_recall = torchmetrics.Recall(task='multiclass', num_classes=self.num_classes)
+        self.valid_recall = torchmetrics.Recall(task='multiclass', num_classes=self.num_classes)
+        self.test_recall = torchmetrics.Recall(task='multiclass', num_classes=self.num_classes)    
     
 
     def forward(self, xs):
@@ -82,7 +83,7 @@ class StackTransformer(pl.LightningModule):
         output = self.forward(xs)
         loss = self.criterion(output, y)
         # wrap into torch.tensor for compatiability with fastai
-        self.train_recall(torch.tensor(output), y)
+        self.train_recall(output, y)
         self.log('train_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('train_recall', self.train_recall, on_step=True, on_epoch=True)
         return loss
@@ -91,7 +92,7 @@ class StackTransformer(pl.LightningModule):
         xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
-        self.valid_recall(torch.tensor(output), y)
+        self.valid_recall(output, y)
         self.log('valid_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('valid_recall', self.valid_recall, on_step=True, on_epoch=True)
         for i, n in enumerate(self._norms):
@@ -102,7 +103,7 @@ class StackTransformer(pl.LightningModule):
         xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
-        self.test_recall(torch.tensor(output), y)
+        self.test_recall(output, y)
         self.log('test_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('test_recall', self.test_recall, on_step=True, on_epoch=True)
         return loss
@@ -110,7 +111,7 @@ class StackTransformer(pl.LightningModule):
     def predict_step(self, batch, batch_idx):
         xs = batch
         output = self.forward(xs)
-        return torch.tensor(output)
+        return output
     
     def configure_optimizers(self):
         param_groups = [
@@ -153,7 +154,7 @@ class EnsembleVotingModel(pl.LightningModule):
         xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
-        self.test_recall(torch.tensor(output), y)
+        self.test_recall(output, y)
         # can't be called 'test_loss' and 'test_recall'!
         self.log('test_full_loss', loss.item())
         self.log('test_full_recall', self.test_recall)
@@ -162,4 +163,4 @@ class EnsembleVotingModel(pl.LightningModule):
     def predict_step(self, batch, batch_idx):
         xs = batch
         output = self.forward(xs)
-        return torch.tensor(output)
+        return output
