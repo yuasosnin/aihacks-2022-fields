@@ -134,6 +134,8 @@ class StackTransformer(pl.LightningModule):
 
 
 class EnsembleVotingModel(pl.LightningModule):
+    num_classes = 7
+
     def __init__(self, model_cls: pl.LightningModule, checkpoint_paths: List[str], mode='mean') -> None:
         super().__init__()
         self.mode = mode
@@ -141,7 +143,7 @@ class EnsembleVotingModel(pl.LightningModule):
             [model_cls.load_from_checkpoint(p) for p in checkpoint_paths])
         
         self.criterion = nn.CrossEntropyLoss()
-        self.test_recall = torchmetrics.Recall()
+        self.test_recall = torchmetrics.Recall(task='multiclass', num_classes=self.num_classes)
     
     def forward(self, xs):
         outputs = [model(xs) for model in self.models]
