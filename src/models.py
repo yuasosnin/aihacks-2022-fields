@@ -8,9 +8,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 import pytorch_lightning as pl
 import torchmetrics
 
-# from tsai.models.TST import TST as TimeSeriesTransformer
-from .tst import TST as TimeSeriesTransformer
-# from torchvision.ops import MLP
+from .tst import TimeSeriesTransformer
 from .torch_utils import MLP
 
 
@@ -37,12 +35,11 @@ class StackTransformer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.seq_lens = seq_lens
-        self._DEBUG = False
         
         self.ts_models = nn.ModuleList([TimeSeriesTransformer(
             c_in=c_in, c_out=d_head, seq_len=seq_len,
-            d_model=d_model, n_heads=nhead, d_ff=dim_feedforward, 
-            dropout=dropout, act=activation, n_layers=num_layers,
+            d_model=d_model, nhead=nhead, d_ff=dim_feedforward, 
+            dropout=dropout, activation=activation, num_layers=num_layers,
             fc_dropout=fc_dropout
         ) for seq_len, c_in in zip(self.seq_lens, c_ins)])
         
@@ -73,16 +70,12 @@ class StackTransformer(pl.LightningModule):
         h = torch.stack(hs, axis=-1)
         self._norms = torch.norm(h, dim=1).mean(dim=0)
         h = torch.mean(h, axis=-1)
-        if not self._DEBUG:
-            return self.head(h)
-        else:
-            return self.head(h), h, hs
+        return self.head(h)
     
     def training_step(self, batch, batch_idx):
         xs, y = batch[:-1], batch[-1]
         output = self.forward(xs)
         loss = self.criterion(output, y)
-        # wrap into torch.tensor for compatiability with fastai
         self.train_recall(output, y)
         self.log('train_loss', loss.item(), on_step=True, on_epoch=True)
         self.log('train_recall', self.train_recall, on_step=True, on_epoch=True)
